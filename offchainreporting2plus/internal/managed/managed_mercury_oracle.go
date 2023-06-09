@@ -118,13 +118,15 @@ func RunManagedMercuryOracle(
 			// 	return
 			// }
 
-			lims, err := todoLimits()
+			ocr3PluginLimits := mercuryshim.OCR3PluginLimits(mercuryPluginInfo.Limits)
+
+			lims, err := ocr3limits(sharedConfig.PublicConfig, ocr3PluginLimits, onchainKeyring.MaxSignatureLength())
 			if err != nil {
 				logger.Error("ManagedMercuryOracle: error during limits", commontypes.LogFields{
-					"error":             err,
-					"publicConfig":      sharedConfig.PublicConfig,
-					"mercuryPluginInfo": mercuryPluginInfo,
-					"maxSigLen":         onchainKeyring.MaxSignatureLength(),
+					"error":            err,
+					"publicConfig":     sharedConfig.PublicConfig,
+					"ocr3PluginLimits": ocr3PluginLimits,
+					"maxSigLen":        onchainKeyring.MaxSignatureLength(),
 				})
 				return
 			}
@@ -151,6 +153,7 @@ func RunManagedMercuryOracle(
 				sharedConfig.ConfigDigest,
 				binNetEndpoint,
 				childLogger,
+				ocr3PluginLimits,
 			)
 			if err := netEndpoint.Start(); err != nil {
 				logger.Error("ManagedMercuryOracle: error during netEndpoint.Start()", commontypes.LogFields{
@@ -181,6 +184,7 @@ func RunManagedMercuryOracle(
 			ocr3Plugin := &mercuryshim.MercuryOCR3Plugin{
 				ocr3PluginConfig,
 				mercuryPlugin,
+				mercuryPluginInfo.Limits,
 			}
 
 			protocol.RunOracle[mercuryshim.MercuryReportInfo](
@@ -194,9 +198,7 @@ func RunManagedMercuryOracle(
 				netEndpoint,
 				offchainKeyring,
 				mercuryshim.NewMercuryOCR3OnchainKeyring(onchainKeyring),
-
-				// shim.LimitCheckReportingPlugin{reportingPlugin, reportingPluginInfo.Limits},
-				ocr3Plugin,
+				shim.LimitCheckOCR3Plugin[mercuryshim.MercuryReportInfo]{ocr3Plugin, ocr3PluginLimits},
 				shim.MakeOCR3TelemetrySender(chTelemetrySend, childLogger),
 			)
 		},

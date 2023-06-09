@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/smartcontractkit/libocr/internal/byzquorum"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/internal/config"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 )
@@ -27,11 +28,11 @@ type PublicConfig struct {
 	// circumstances.
 	DeltaResend time.Duration
 	// DeltaRound determines the minimal amount of time that should pass between
-	// the start of report generation rounds. With OCR2 only (not OCR1!) you can
+	// the start of outcome generation rounds. With OCR3 (not OCR1!) you can
 	// set this value very aggressively. Note that this only provides a lower
 	// bound on the round interval; actual rounds might take longer.
 	DeltaRound time.Duration
-	// Once the leader of a report generation round has collected sufficiently
+	// Once the leader of a outcome generation round has collected sufficiently
 	// many observations, it will wait for DeltaGrace to pass to allow slower
 	// oracles to still contribute an observation before moving on to generating
 	// the report. Consequently, rounds driven by correct leaders will always
@@ -87,6 +88,10 @@ type PublicConfig struct {
 // N is the number of oracles participating in the protocol
 func (c *PublicConfig) N() int {
 	return len(c.OracleIdentities)
+}
+
+func (c *PublicConfig) ByzQuorumSize() int {
+	return byzquorum.Size(c.N(), c.F)
 }
 
 func (c *PublicConfig) CheckParameterBounds() error {
@@ -296,10 +301,10 @@ func checkPublicConfigParameters(cfg PublicConfig) error {
 			cfg.DeltaRound, cfg.DeltaProgress)
 	}
 
-	sumMaxDurationsReportGeneration := cfg.MaxDurationQuery + cfg.MaxDurationObservation
-	if !(sumMaxDurationsReportGeneration < cfg.DeltaProgress) {
+	sumMaxDurationsOutcomeGeneration := cfg.MaxDurationQuery + cfg.MaxDurationObservation
+	if !(sumMaxDurationsOutcomeGeneration < cfg.DeltaProgress) {
 		return fmt.Errorf("sum of MaxDurationQuery/Observation (%v) must be less than DeltaProgress (%v)",
-			sumMaxDurationsReportGeneration, cfg.DeltaProgress)
+			sumMaxDurationsOutcomeGeneration, cfg.DeltaProgress)
 	}
 
 	// We cannot easily add a similar check for the MaxDuration variables used

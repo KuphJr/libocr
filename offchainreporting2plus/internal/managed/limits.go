@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/internal/config/ocr2config"
+	"github.com/smartcontractkit/libocr/offchainreporting2plus/internal/config/ocr3config"
+	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3types"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 )
 
@@ -84,14 +86,113 @@ func ocr2limits(cfg ocr2config.PublicConfig, reportingPluginLimits types.Reporti
 	}, nil
 }
 
-func todoLimits() (types.BinaryNetworkEndpointLimits, error) {
+func ocr3limits(cfg ocr3config.PublicConfig, pluginLimits ocr3types.OCR3PluginLimits, maxSigLen int) (types.BinaryNetworkEndpointLimits, error) {
+
+	overflow := false
+
+	// These two helper functions add/multiply together a bunch of numbers and set overflow to true if the result
+	// lies outside the range [0; math.MaxInt32]. We compare with int32 rather than int to be independent of
+	// the underlying architecture.
+	add := func(xs ...int) int {
+		sum := big.NewInt(0)
+		for _, x := range xs {
+			sum.Add(sum, big.NewInt(int64(x)))
+		}
+		if !(big.NewInt(0).Cmp(sum) <= 0 && sum.Cmp(big.NewInt(int64(math.MaxInt32))) <= 0) {
+			overflow = true
+		}
+		return int(sum.Int64())
+	}
+	mul := func(xs ...int) int {
+		prod := big.NewInt(1)
+		for _, x := range xs {
+			prod.Mul(prod, big.NewInt(int64(x)))
+		}
+		if !(big.NewInt(0).Cmp(prod) <= 0 && prod.Cmp(big.NewInt(int64(math.MaxInt32))) <= 0) {
+			overflow = true
+		}
+		return int(prod.Int64())
+	}
+
+	const sigOverhead = 10
+	const overhead = 256
+
+	maxLenCertifiedPrepareOrCommit := add(mul(ed25519.SignatureSize+sigOverhead, cfg.ByzQuorumSize()), pluginLimits.MaxOutcomeLength, overhead)
+
+	maxLenNewEpoch := overhead
+	maxLenReconcile := add(maxLenCertifiedPrepareOrCommit, overhead)
+	maxLenStartEpoch := add(maxLenCertifiedPrepareOrCommit, mul(ed25519.SignatureSize+sigOverhead, cfg.ByzQuorumSize()), overhead)
+	maxLenStartRound := add(pluginLimits.MaxQueryLength, overhead)
+	maxLenObserve := add(pluginLimits.MaxObservationLength, overhead)
+	maxLenPropose := add(mul(add(pluginLimits.MaxObservationLength, ed25519.SignatureSize+sigOverhead, overhead), cfg.N()), overhead)
+	maxLenPrepare := overhead
+	maxLenCommit := overhead
+	maxLenFinal := add(mul(add(maxSigLen, sigOverhead), pluginLimits.MaxReportCount), overhead)
+	maxLenRequestCertifiedCommit := overhead
+	maxLenSupplyCertifiedCommit := add(maxLenCertifiedPrepareOrCommit, overhead)
+
+	maxMessageSize := max(
+		maxLenNewEpoch,
+		maxLenReconcile,
+		maxLenStartEpoch,
+		maxLenStartRound,
+		maxLenObserve,
+		maxLenPropose,
+		maxLenPrepare,
+		maxLenCommit,
+		maxLenFinal,
+		maxLenRequestCertifiedCommit,
+		maxLenSupplyCertifiedCommit,
+	)
+
+	minEpochInterval := math.Min(float64(cfg.DeltaProgress), float64(cfg.RMax)*float64(cfg.DeltaRound))
+
+	messagesRate := (1.0*float64(time.Second)/float64(cfg.DeltaResend) +
+		3.0*float64(time.Second)/minEpochInterval +
+		8.0*float64(time.Second)/float64(cfg.DeltaRound)) * 1.2
+
+	messagesCapacity := mul(12, 3)
+
+	bytesRate := float64(time.Second)/float64(cfg.DeltaResend)*float64(maxLenNewEpoch) +
+		float64(time.Second)/float64(minEpochInterval)*float64(maxLenNewEpoch) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenPrepare) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenCommit) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenFinal) +
+		float64(time.Second)/float64(minEpochInterval)*float64(maxLenStartEpoch) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenStartRound) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenPropose) +
+		float64(time.Second)/float64(minEpochInterval)*float64(maxLenReconcile) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenObserve) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenRequestCertifiedCommit) +
+		float64(time.Second)/float64(cfg.DeltaRound)*float64(maxLenSupplyCertifiedCommit)
+
+	// we don't multiply bytesRate by a safetyMargin since we already have a generous overhead on each message
+
+	bytesCapacity := mul(add(
+		maxLenNewEpoch,
+		maxLenReconcile,
+		maxLenStartEpoch,
+		maxLenStartRound,
+		maxLenObserve,
+		maxLenPropose,
+		maxLenPrepare,
+		maxLenCommit,
+		maxLenFinal,
+		maxLenRequestCertifiedCommit,
+		maxLenSupplyCertifiedCommit,
+	), 3)
+
+	if overflow {
+		// this should not happen due to us checking the limits in types.go
+		return types.BinaryNetworkEndpointLimits{}, fmt.Errorf("int32 overflow while computing bandwidth limits")
+	}
 
 	return types.BinaryNetworkEndpointLimits{
-		100_000_000,
-		100_000_000,
-		100_000_000,
-		100_000_000,
-		100_000_000,
+		maxMessageSize,
+		messagesRate,
+		messagesCapacity,
+		bytesRate,
+		bytesCapacity,
 	}, nil
 }
 

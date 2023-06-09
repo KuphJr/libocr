@@ -20,8 +20,8 @@ func RunPacemaker[RI any](
 	ctx context.Context,
 
 	chNetToPacemaker <-chan MessageToPacemakerWithSender[RI],
-	chPacemakerToReportGeneration chan<- EventToReportGeneration[RI],
-	chReportGenerationToPacemaker <-chan EventToPacemaker[RI],
+	chPacemakerToOutcomeGeneration chan<- EventToOutcomeGeneration[RI],
+	chOutcomeGenerationToPacemaker <-chan EventToPacemaker[RI],
 	config ocr3config.SharedConfig,
 	database Database,
 	id commontypes.OracleID,
@@ -35,7 +35,7 @@ func RunPacemaker[RI any](
 ) {
 	pace := makePacemakerState[RI](
 		ctx, chNetToPacemaker,
-		chPacemakerToReportGeneration, chReportGenerationToPacemaker,
+		chPacemakerToOutcomeGeneration, chOutcomeGenerationToPacemaker,
 		config, database,
 		id, localConfig, logger, netSender, offchainKeyring,
 		telemetrySender,
@@ -46,8 +46,8 @@ func RunPacemaker[RI any](
 func makePacemakerState[RI any](
 	ctx context.Context,
 	chNetToPacemaker <-chan MessageToPacemakerWithSender[RI],
-	chPacemakerToReportGeneration chan<- EventToReportGeneration[RI],
-	chReportGenerationToPacemaker <-chan EventToPacemaker[RI],
+	chPacemakerToOutcomeGeneration chan<- EventToOutcomeGeneration[RI],
+	chOutcomeGenerationToPacemaker <-chan EventToPacemaker[RI],
 	config ocr3config.SharedConfig,
 	database Database, id commontypes.OracleID,
 	localConfig types.LocalConfig,
@@ -59,17 +59,17 @@ func makePacemakerState[RI any](
 	return pacemakerState[RI]{
 		ctx: ctx,
 
-		chNetToPacemaker:              chNetToPacemaker,
-		chPacemakerToReportGeneration: chPacemakerToReportGeneration,
-		chReportGenerationToPacemaker: chReportGenerationToPacemaker,
-		config:                        config,
-		database:                      database,
-		id:                            id,
-		localConfig:                   localConfig,
-		logger:                        logger,
-		netSender:                     netSender,
-		offchainKeyring:               offchainKeyring,
-		telemetrySender:               telemetrySender,
+		chNetToPacemaker:               chNetToPacemaker,
+		chPacemakerToOutcomeGeneration: chPacemakerToOutcomeGeneration,
+		chOutcomeGenerationToPacemaker: chOutcomeGenerationToPacemaker,
+		config:                         config,
+		database:                       database,
+		id:                             id,
+		localConfig:                    localConfig,
+		logger:                         logger.MakeUpdated(commontypes.LogFields{"proto": "pacemaker"}),
+		netSender:                      netSender,
+		offchainKeyring:                offchainKeyring,
+		telemetrySender:                telemetrySender,
 
 		newepoch: make([]uint64, config.N()),
 	}
@@ -78,17 +78,17 @@ func makePacemakerState[RI any](
 type pacemakerState[RI any] struct {
 	ctx context.Context
 
-	chNetToPacemaker              <-chan MessageToPacemakerWithSender[RI]
-	chPacemakerToReportGeneration chan<- EventToReportGeneration[RI]
-	chReportGenerationToPacemaker <-chan EventToPacemaker[RI]
-	config                        ocr3config.SharedConfig
-	database                      Database
-	id                            commontypes.OracleID
-	localConfig                   types.LocalConfig
-	logger                        loghelper.LoggerWithContext
-	netSender                     NetworkSender[RI]
-	offchainKeyring               types.OffchainKeyring
-	telemetrySender               TelemetrySender
+	chNetToPacemaker               <-chan MessageToPacemakerWithSender[RI]
+	chPacemakerToOutcomeGeneration chan<- EventToOutcomeGeneration[RI]
+	chOutcomeGenerationToPacemaker <-chan EventToPacemaker[RI]
+	config                         ocr3config.SharedConfig
+	database                       Database
+	id                             commontypes.OracleID
+	localConfig                    types.LocalConfig
+	logger                         loghelper.LoggerWithContext
+	netSender                      NetworkSender[RI]
+	offchainKeyring                types.OffchainKeyring
+	telemetrySender                TelemetrySender
 	// Test use only: send testBlocker an event to halt the pacemaker event loop,
 	// send testUnblocker an event to resume it.
 	testBlocker   chan eventTestBlock
@@ -117,7 +117,7 @@ type pacemakerState[RI any] struct {
 	// whether the current leader is making adequate progress.
 	tProgress <-chan time.Time
 
-	notifyReportGenerationOfNewEpoch bool
+	notifyOutcomeGenerationOfNewEpoch bool
 }
 
 func (pace *pacemakerState[RI]) run(restoredEpoch uint64) {
@@ -139,7 +139,7 @@ func (pace *pacemakerState[RI]) run(restoredEpoch uint64) {
 
 	pace.sendNewepoch(pace.ne)
 
-	pace.notifyReportGenerationOfNewEpoch = true
+	pace.notifyOutcomeGenerationOfNewEpoch = true
 
 	// Initialization complete
 
@@ -149,19 +149,19 @@ func (pace *pacemakerState[RI]) run(restoredEpoch uint64) {
 
 	// Event Loop
 	for {
-		var nilOrChPacemakerToReportGeneration chan<- EventToReportGeneration[RI]
-		if pace.notifyReportGenerationOfNewEpoch {
-			nilOrChPacemakerToReportGeneration = pace.chPacemakerToReportGeneration
+		var nilOrChPacemakerToOutcomeGeneration chan<- EventToOutcomeGeneration[RI]
+		if pace.notifyOutcomeGenerationOfNewEpoch {
+			nilOrChPacemakerToOutcomeGeneration = pace.chPacemakerToOutcomeGeneration
 		} else {
-			nilOrChPacemakerToReportGeneration = nil
+			nilOrChPacemakerToOutcomeGeneration = nil
 		}
 
 		select {
-		case nilOrChPacemakerToReportGeneration <- EventStartNewEpoch[RI]{pace.e}:
-			pace.notifyReportGenerationOfNewEpoch = false
+		case nilOrChPacemakerToOutcomeGeneration <- EventNewEpochStart[RI]{pace.e}:
+			pace.notifyOutcomeGenerationOfNewEpoch = false
 		case msg := <-pace.chNetToPacemaker:
 			msg.msg.processPacemaker(pace, msg.sender)
-		case ev := <-pace.chReportGenerationToPacemaker:
+		case ev := <-pace.chOutcomeGenerationToPacemaker:
 			ev.processPacemaker(pace)
 		case <-pace.tResend:
 			pace.eventTResendTimeout()
@@ -261,7 +261,7 @@ func (pace *pacemakerState[RI]) messageNewepoch(msg MessageNewEpoch[RI], sender 
 				pace.ne = pace.e
 			}
 
-			pace.notifyReportGenerationOfNewEpoch = true
+			pace.notifyOutcomeGenerationOfNewEpoch = true
 
 			pace.tProgress = time.After(pace.config.DeltaProgress) // restart timer T_{progress}
 		}

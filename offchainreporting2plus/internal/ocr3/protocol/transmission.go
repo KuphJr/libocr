@@ -31,7 +31,7 @@ func RunTransmission[RI any](
 	ctx context.Context,
 	subprocesses *subprocesses.Subprocesses,
 
-	chReportFinalizationToTransmission <-chan EventToTransmission[RI],
+	chReportAttestationToTransmission <-chan EventToTransmission[RI],
 	config ocr3config.SharedConfig,
 	contractTransmitter ocr3types.ContractTransmitter[RI],
 	database ocr3types.Database,
@@ -44,14 +44,14 @@ func RunTransmission[RI any](
 		ctx:          ctx,
 		subprocesses: subprocesses,
 
-		chReportFinalizationToTransmission: chReportFinalizationToTransmission,
-		config:                             config,
-		contractTransmitter:                contractTransmitter,
-		database:                           database,
-		id:                                 id,
-		localConfig:                        localConfig,
-		logger:                             logger,
-		reportingPlugin:                    reportingPlugin,
+		chReportAttestationToTransmission: chReportAttestationToTransmission,
+		config:                            config,
+		contractTransmitter:               contractTransmitter,
+		database:                          database,
+		id:                                id,
+		localConfig:                       localConfig,
+		logger:                            logger.MakeUpdated(commontypes.LogFields{"proto": "transmission"}),
+		reportingPlugin:                   reportingPlugin,
 	}
 	t.run()
 }
@@ -60,14 +60,14 @@ type transmissionState[RI any] struct {
 	ctx          context.Context
 	subprocesses *subprocesses.Subprocesses
 
-	chReportFinalizationToTransmission <-chan EventToTransmission[RI]
-	config                             ocr3config.SharedConfig
-	contractTransmitter                ocr3types.ContractTransmitter[RI]
-	database                           ocr3types.Database
-	id                                 commontypes.OracleID
-	localConfig                        types.LocalConfig
-	logger                             loghelper.LoggerWithContext
-	reportingPlugin                    ocr3types.OCR3Plugin[RI]
+	chReportAttestationToTransmission <-chan EventToTransmission[RI]
+	config                            ocr3config.SharedConfig
+	contractTransmitter               ocr3types.ContractTransmitter[RI]
+	database                          ocr3types.Database
+	id                                commontypes.OracleID
+	localConfig                       types.LocalConfig
+	logger                            loghelper.LoggerWithContext
+	reportingPlugin                   ocr3types.OCR3Plugin[RI]
 
 	chPersist chan<- persist.TransmissionDBUpdate
 	times     MinHeapTimeToPendingTransmission[RI]
@@ -93,7 +93,7 @@ func (t *transmissionState[RI]) run() {
 	chDone := t.ctx.Done()
 	for {
 		select {
-		case ev := <-t.chReportFinalizationToTransmission:
+		case ev := <-t.chReportAttestationToTransmission:
 			ev.processTransmission(t)
 		case <-t.tTransmit:
 			t.eventTTransmitTimeout()
@@ -140,7 +140,7 @@ func (t *transmissionState[RI]) run() {
 // }
 
 // eventTransmit is called when the local process sends a transmit event
-func (t *transmissionState[RI]) eventTransmit(ev EventTransmit[RI]) {
+func (t *transmissionState[RI]) eventTransmit(ev EventAttestedReport[RI]) {
 	t.logger.Debug("Received transmit event", commontypes.LogFields{
 		"seqNr":     ev.SeqNr,
 		"index":     ev.Index,

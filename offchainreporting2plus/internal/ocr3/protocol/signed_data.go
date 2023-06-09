@@ -336,11 +336,10 @@ type StartEpochProof struct {
 func (qc *StartEpochProof) Verify(
 	ocr3ts Timestamp,
 	oracleIdentities []config.OracleIdentity,
-	n int,
-	f int,
+	byzQuorumSize int,
 ) error {
-	if ByzQuorumSize(n, f) != len(qc.HighestCertifiedProof) {
-		return fmt.Errorf("wrong length of HighestCertifiedProof, expected %v for byz. quorum and got %v", ByzQuorumSize(n, f), len(qc.HighestCertifiedProof))
+	if byzQuorumSize != len(qc.HighestCertifiedProof) {
+		return fmt.Errorf("wrong length of HighestCertifiedProof, expected %v for byz. quorum and got %v", byzQuorumSize, len(qc.HighestCertifiedProof))
 	}
 
 	maximumTimestamp := qc.HighestCertifiedProof[0].SignedHighestCertifiedTimestamp.HighestCertifiedTimestamp
@@ -367,7 +366,7 @@ func (qc *StartEpochProof) Verify(
 		return fmt.Errorf("mismatch between timestamp of HighestCertified (%v) and the max from HighestCertifiedProof (%v)", qc.HighestCertified.Timestamp(), maximumTimestamp)
 	}
 
-	if err := qc.HighestCertified.Verify(ocr3ts.ConfigDigest, oracleIdentities, n, f); err != nil {
+	if err := qc.HighestCertified.Verify(ocr3ts.ConfigDigest, oracleIdentities, byzQuorumSize); err != nil {
 		return fmt.Errorf("failed to verify HighestCertified: %w", err)
 	}
 
@@ -382,8 +381,7 @@ type CertifiedPrepareOrCommit interface {
 	Verify(
 		_ types.ConfigDigest,
 		_ []config.OracleIdentity,
-		n int,
-		f int,
+		byzQuorumSize int,
 	) error
 }
 
@@ -417,11 +415,10 @@ func (hc *CertifiedPrepareOrCommitPrepare) IsGenesis() bool {
 func (hc *CertifiedPrepareOrCommitPrepare) Verify(
 	configDigest types.ConfigDigest,
 	oracleIdentities []config.OracleIdentity,
-	n int,
-	f int,
+	byzQuorumSize int,
 ) error {
-	if ByzQuorumSize(n, f) != len(hc.PrepareQuorumCertificate) {
-		return fmt.Errorf("wrong number of signatures, expected %v for byz. quorum and got %v", ByzQuorumSize(n, f), len(hc.PrepareQuorumCertificate))
+	if byzQuorumSize != len(hc.PrepareQuorumCertificate) {
+		return fmt.Errorf("wrong number of signatures, expected %v for byz. quorum and got %v", byzQuorumSize, len(hc.PrepareQuorumCertificate))
 	}
 
 	ocr3ts := Timestamp{
@@ -474,17 +471,16 @@ func (hc *CertifiedPrepareOrCommitCommit) IsGenesis() bool {
 func (hc *CertifiedPrepareOrCommitCommit) Verify(
 	configDigest types.ConfigDigest,
 	oracleIdentities []config.OracleIdentity,
-	n int,
-	f int,
+	byzQuorumSize int,
 ) error {
 
 	if hc.IsGenesis() {
 		return nil
 	}
 
-	if ByzQuorumSize(n, f) != len(hc.CommitQuorumCertificate) {
+	if byzQuorumSize != len(hc.CommitQuorumCertificate) {
 
-		return fmt.Errorf("wrong number of signatures, expected %v for byz. quorum and got %v. hc %+v", ByzQuorumSize(n, f), len(hc.CommitQuorumCertificate), hc)
+		return fmt.Errorf("wrong number of signatures, expected %v for byz. quorum and got %v. hc %+v", byzQuorumSize, len(hc.CommitQuorumCertificate), hc)
 	}
 
 	ocr3ts := Timestamp{
